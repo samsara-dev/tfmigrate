@@ -2,6 +2,7 @@ package tfmigrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -27,6 +28,8 @@ type StateMigratorConfig struct {
 	// Force option controls behaviour in case of unexpected diff in plan.
 	// When set forces applying even if plan shows diff.
 	Force bool `hcl:"force,optional"`
+	// SkipPlan controls whether or not to run and analyze Terraform plan.
+	SkipPlan bool `hcl:"to_skip_plan,optional"`
 	// Workspace is the state workspace which the migration works with.
 	Workspace string `hcl:"workspace,optional"`
 }
@@ -61,7 +64,7 @@ func (c *StateMigratorConfig) NewMigrator(o *MigratorOption) (Migrator, error) {
 		c.Workspace = "default"
 	}
 
-	return NewStateMigrator(dir, c.Workspace, actions, o, c.Force), nil
+	return NewStateMigrator(dir, c.Workspace, actions, o, c.Force, c.SkipPlan), nil
 }
 
 // StateMigrator implements the Migrator interface.
@@ -73,6 +76,8 @@ type StateMigrator struct {
 	// o is an option for migrator.
 	// It is used for shared settings across Migrator instances.
 	o *MigratorOption
+	// skipPlan controls whether or not to run and analyze Terraform plan.
+	skipPlan bool
 	// force operation in case of unexpected diff
 	force bool
 	// workspace is the state workspace which the migration works with.
@@ -83,7 +88,7 @@ var _ Migrator = (*StateMigrator)(nil)
 
 // NewStateMigrator returns a new StateMigrator instance.
 func NewStateMigrator(dir string, workspace string, actions []StateAction,
-	o *MigratorOption, force bool) *StateMigrator {
+	o *MigratorOption, force bool, skipPlan bool) *StateMigrator {
 	e := tfexec.NewExecutor(dir, os.Environ())
 	tf := tfexec.NewTerraformCLI(e)
 	if o != nil && len(o.ExecPath) > 0 {
@@ -95,6 +100,7 @@ func NewStateMigrator(dir string, workspace string, actions []StateAction,
 		actions:   actions,
 		o:         o,
 		force:     force,
+		skipPlan:  skipPlan,
 		workspace: workspace,
 	}
 }
@@ -103,7 +109,7 @@ func NewStateMigrator(dir string, workspace string, actions []StateAction,
 // It will fail if terraform plan detects any diffs with the new state.
 // We intentionally keep this method private as to not expose internal states and unify
 // the Migrator interface between a single and multi state migrator.
-func (m *StateMigrator) plan(ctx context.Context) (*tfexec.State, error) {
+func (m *StateMigrator) plan(ctx context.Context) (currentState *tfexec.State, err error) {
 	ignoreLegacyStateInitErr := false
 	for _, action := range m.actions {
 		// When invoking `state replace-provider`, it's necessary to first
@@ -121,8 +127,11 @@ func (m *StateMigrator) plan(ctx context.Context) (*tfexec.State, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// switch back it to remote on exit.
-	defer switchBackToRemoteFunc()
+	defer func() {
+		err = errors.Join(err, switchBackToRemoteFunc())
+	}()
 
 	// computes a new state by applying state migration operations to a temporary state.
 	log.Printf("[INFO] [migrator@%s] compute a new state\n", m.tf.Dir())
@@ -141,21 +150,27 @@ func (m *StateMigrator) plan(ctx context.Context) (*tfexec.State, error) {
 		planOpts = append(planOpts, "-out="+m.o.PlanOut)
 	}
 
-	log.Printf("[INFO] [migrator@%s] check diffs\n", m.tf.Dir())
-	_, err = m.tf.Plan(ctx, currentState, planOpts...)
-	if err != nil {
-		if exitErr, ok := err.(tfexec.ExitError); ok && exitErr.ExitCode() == 2 {
-			if !m.force {
-				log.Printf("[ERROR] [migrator@%s] unexpected diffs\n", m.tf.Dir())
-				return nil, fmt.Errorf("terraform plan command returns unexpected diffs: %s", err)
+	if m.skipPlan {
+		log.Printf("[INFO] [migrator@%s] skipping check diffs\n", m.tf.Dir())
+	} else {
+		log.Printf("[INFO] [migrator@%s] check diffs\n", m.tf.Dir())
+		_, err = m.tf.Plan(ctx, currentState, planOpts...)
+		if err != nil {
+			if exitErr, ok := err.(tfexec.ExitError); ok && exitErr.ExitCode() == 2 {
+				if !m.force {
+					log.Printf("[ERROR] [migrator@%s] unexpected diffs\n", m.tf.Dir())
+					return nil, fmt.Errorf("terraform plan command returns unexpected diffs: %s", err)
+				}
+				log.Printf("[INFO] [migrator@%s] unexpected diffs, ignoring as force option is true: %s", m.tf.Dir(), err)
+				// reset err to nil to intentionally ignore unexpected diffs.
+				err = nil
+			} else {
+				return nil, err
 			}
-			log.Printf("[INFO] [migrator@%s] unexpected diffs, ignoring as force option is true: %s", m.tf.Dir(), err)
-		} else {
-			return nil, err
 		}
 	}
 
-	return currentState, nil
+	return currentState, err
 }
 
 // Plan computes a new state by applying state migration operations to a temporary state.

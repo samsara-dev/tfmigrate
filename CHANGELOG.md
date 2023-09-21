@@ -1,5 +1,15 @@
 ## master (Unreleased)
 
+## 0.3.16 (2023/09/05)
+
+BUG FIXES:
+
+* avoid suppressing errors in deferred funcs ([#150](https://github.com/minamijoyo/tfmigrate/pull/150))
+
+ENHANCEMENTS:
+
+* exercise Apply during acceptance tests ([#149](https://github.com/minamijoyo/tfmigrate/pull/149))
+
 ## 0.3.15 (2023/09/04)
 
 NEW FEATURES:
