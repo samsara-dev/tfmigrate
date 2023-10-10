@@ -339,6 +339,8 @@ func writeTempFile(content []byte) (*os.File, error) {
 		return tmpfile, fmt.Errorf("failed to close temporary file: %s", err)
 	}
 
+	log.Printf("[DEBUG] [executor] created temporary file: %s\n", tmpfile.Name())
+
 	return tmpfile, nil
 }
 

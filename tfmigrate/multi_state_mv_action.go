@@ -45,3 +45,23 @@ func (a *MultiStateMvAction) MultiStateUpdate(ctx context.Context, fromTf tfexec
 
 	return fromNewState, toNewState, nil
 }
+
+// FastMultStateUpdate updates given two states in place and avoids copying states as much as possible.
+// It moves a resource from a dir to another.
+// It also can rename an address of resource.
+func (a *MultiStateMvAction) FastMultiStateUpdate(ctx context.Context, fromTf tfexec.TerraformCLI, toTf tfexec.TerraformCLI, fromStateFile string, toStateFile string) error {
+	diffState := tfexec.NewState([]byte{})
+	_, diffNewState, err := fromTf.StateMv(ctx, nil, diffState, a.source, a.source, "-state="+fromStateFile, "-backup=/dev/null")
+	if err != nil {
+		return err
+	}
+
+	// move the resource from the diffState to toState.
+	_, _, err = toTf.StateMv(ctx, diffNewState, nil, a.source, a.destination, "-backup=/dev/null", "-state-out="+toStateFile)
+	if err != nil {
+		return err
+	}
+
+	return nil
+	// return fromTf.StateMv(ctx, diffNewState, nil, a.source, a.destination, "-state-out="+toStateFile, "-backup=/dev/null")
+}

@@ -2,7 +2,7 @@ package tfmigrate
 
 import (
 	"context"
-
+	"errors"
 	"github.com/minamijoyo/tfmigrate/tfexec"
 )
 
@@ -42,6 +42,10 @@ func (a *MultiStateXmvAction) MultiStateUpdate(ctx context.Context, fromTf tfexe
 		}
 	}
 	return fromState, toState, nil
+}
+
+func (a *MultiStateXmvAction) FastMultiStateUpdate(ctx context.Context, fromTf tfexec.TerraformCLI, toTf tfexec.TerraformCLI, fromStateFile string, toStateFile string) error {
+	return errors.New("not implemented")
 }
 
 // generateMvActions uses an xmv and use the state to determine the corresponding mv actions.
