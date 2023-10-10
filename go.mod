@@ -3,7 +3,6 @@ module github.com/minamijoyo/tfmigrate
 go 1.21
 
 require (
-	cloud.google.com/go/storage v1.25.0
 	github.com/aws/aws-sdk-go v1.43.22
 	github.com/davecgh/go-spew v1.1.1
 	github.com/google/go-cmp v0.5.8
@@ -18,8 +17,6 @@ require (
 
 require (
 	cloud.google.com/go v0.102.1 // indirect
-	cloud.google.com/go/compute v1.7.0 // indirect
-	cloud.google.com/go/iam v0.3.0 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg v1.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v12 v12.0.0 // indirect

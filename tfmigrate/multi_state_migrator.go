@@ -2,11 +2,11 @@ package tfmigrate
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/minamijoyo/tfmigrate/tfexec"
 )
 
@@ -114,6 +114,24 @@ func NewMultiStateMigrator(fromDir string, toDir string, fromWorkspace string, t
 	}
 }
 
+// writeTempFile writes content to a temporary file and return its file.
+func writeTempFile(content []byte) (*os.File, error) {
+	tmpfile, err := os.CreateTemp("", "tmp")
+	if err != nil {
+		return tmpfile, fmt.Errorf("failed to create temporary file: %s", err)
+	}
+
+	if _, err := tmpfile.Write(content); err != nil {
+		return tmpfile, fmt.Errorf("failed to write temporary file: %s", err)
+	}
+
+	if err := tmpfile.Close(); err != nil {
+		return tmpfile, fmt.Errorf("failed to close temporary file: %s", err)
+	}
+
+	return tmpfile, nil
+}
+
 // plan computes new states by applying multi state migration operations to temporary states.
 // It will fail if terraform plan detects any diffs with at least one new state.
 // We intentionally make this method private to avoid exposing internal states and unify
@@ -126,7 +144,7 @@ func (m *MultiStateMigrator) plan(ctx context.Context) (fromCurrentState *tfexec
 	}
 	// switch back it to remote on exit.
 	defer func() {
-		err = errors.Join(err, fromSwitchBackToRemoteFunc())
+		err = multierror.Append(err, fromSwitchBackToRemoteFunc())
 	}()
 
 	// setup toDir.
@@ -136,20 +154,44 @@ func (m *MultiStateMigrator) plan(ctx context.Context) (fromCurrentState *tfexec
 	}
 	// switch back it to remote on exit.
 	defer func() {
-		err = errors.Join(err, toSwitchBackToRemoteFunc())
+		err = multierror.Append(err, toSwitchBackToRemoteFunc())
 	}()
 
 	// computes new states by applying state migration operations to temporary states.
 	log.Printf("[INFO] [migrator] compute new states (%s => %s)\n", m.fromTf.Dir(), m.toTf.Dir())
-	var fromNewState, toNewState *tfexec.State
+
+	// write current states to temporary files.
+	fromStateFile, err := writeTempFile(fromCurrentState.Bytes())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.Remove(fromStateFile.Name())
+	toStateFile, err := writeTempFile(toCurrentState.Bytes())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.Remove(toStateFile.Name())
+
+	//var fromNewState, toNewState *tfexec.State
 	for _, action := range m.actions {
-		fromNewState, toNewState, err = action.MultiStateUpdate(ctx, m.fromTf, m.toTf, fromCurrentState, toCurrentState)
+		err = action.FastMultiStateUpdate(ctx, m.fromTf, m.toTf, fromStateFile.Name(), toStateFile.Name())
 		if err != nil {
 			return nil, nil, err
 		}
-		fromCurrentState = tfexec.NewState(fromNewState.Bytes())
-		toCurrentState = tfexec.NewState(toNewState.Bytes())
 	}
+
+	// read updated states.
+	fromNewStateBytes, err := os.ReadFile(fromStateFile.Name())
+	if err != nil {
+		return nil, nil, err
+	}
+	fromCurrentState = tfexec.NewState(fromNewStateBytes)
+
+	toNewStateBytes, err := os.ReadFile(toStateFile.Name())
+	if err != nil {
+		return nil, nil, err
+	}
+	toCurrentState = tfexec.NewState(toNewStateBytes)
 
 	// build plan options
 	planOpts := []string{"-input=false", "-no-color", "-detailed-exitcode"}

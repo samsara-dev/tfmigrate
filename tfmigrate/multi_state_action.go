@@ -12,6 +12,7 @@ import (
 type MultiStateAction interface {
 	// MultiStateUpdate updates given two states and returns new two states.
 	MultiStateUpdate(ctx context.Context, fromTf tfexec.TerraformCLI, toTf tfexec.TerraformCLI, fromState *tfexec.State, toState *tfexec.State) (*tfexec.State, *tfexec.State, error)
+	FastMultiStateUpdate(ctx context.Context, fromTf tfexec.TerraformCLI, toTf tfexec.TerraformCLI, fromStateFile string, toStateFile string) error
 }
 
 // NewMultiStateActionFromString is a factory method which returns a new
